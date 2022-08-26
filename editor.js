@@ -855,6 +855,9 @@ class Editor {
         this.inputType = "clear";
         this.inputByUser = true;
 
+        this.iframe.contentDocument.execCommand("selectAll", false, null);
+        this.iframe.contentDocument.execCommand("removeFormat", false, null);
+        this.iframe.contentDocument.execCommand("delete", false, null);
         this.editor.innerHTML = "";
 
         this.resetUndo();
