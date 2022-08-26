@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ja" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+
+    <script type="text/javascript" src="editor.js"></script>
+    <link rel="stylesheet" type="text/css" href="styles.css">
+
+    <title>アンドゥ・リドゥのテスト</title>
+</head>
+
+<body>
+    <div class="contents">
+        <div class="toolbar" onmousedown="event.preventDefault();">
+            <input type="button" id="undo" class="unenabled" value="元に戻す" onclick="onClickUndo();" />
+            <input type="button" id="redo" class="unenabled" value="やり直す" onclick="onClickRedo();" />
+
+            <div class="toolbar-space"></div>
+
+            <input type="button" value="太字" onclick="onClickBold();" />
+            <input type="button" value="斜体" onclick="onClickItalic();" />
+            <input type="button" value="下線" onclick="onClickUnderline();" />
+            <input type="button" value="打ち消し線" onclick="onClickStrikethrough();" />
+
+            <div class="toolbar-fontsize-label">
+                <div id="fontsize-text" class="toolbar-fontsize-text"></div>
+            </div>
+            <input type="range" id="fontsize" min="1" max="200" title="文字のサイズ" oninput="onFontSize(this.value);" onmousedown="event.stopPropagation();" />
+
+            <select title="文字の色" oninput="onFontColor(this.value);" onmousedown="event.stopPropagation();">
+                <option value="#000000">黒</option>
+                <option value="#e60033">赤</option>
+                <option value="#007b43">緑</option>
+                <option value="#0095d9">青</option>
+                <option value="#ffd900">黄色</option>
+                <option value="#a0d8ef">水色</option>
+                <option value="#f08300">オレンジ</option>
+                <option value="#b8d200">黄緑</option>
+                <option value="#884898">紫</option>
+                <option value="#6f4b3e">焦げ茶</option>
+                <option value="#9ea1a3">灰色</option>
+            </select>
+
+            <input type="button" value="書体を初期化" onclick="onClickRemoveFormat();" />
+
+            <input type="button" value="クリア" onclick="onClickClear();" />
+        </div>
+
+        <iframe frameborder="0" sandbox="allow-same-origin" style="width: 100%; height: 100%;" onload="onLoadFrame(this);" srcdoc='
+        <html style="height: 100%;">
+        <head>
+            <style>
+                .editor:focus {
+                    outline: none;
+                }
+
+                .editor img {
+                    cursor: grab;
+                }
+
+                .editor-image-default-cursor img {
+                    cursor: unset;
+                }
+
+                .handle {
+                    position: absolute;
+                    box-sizing: border-box;
+                    left: 0px;
+                    top: 0px;
+                    display: none;
+                    pointer-events: none;
+                }
+
+                .handle-rect {
+                    position: absolute;
+                    box-sizing: border-box;
+                    left: -1px;
+                    top: -1px;
+                    right: -1px;
+                    bottom: -1px;
+                    border: solid 3px #2ca9e1;
+                    opacity: 0.6;
+                    pointer-events: none;
+                }
+
+                .handle-corner {
+                    position: absolute;
+                    box-sizing: border-box;
+                    width: 10px;
+                    height: 10px;
+                    background: #2ca9e1;
+                    border: solid 1px #2ca9e1;
+                    -webkit-user-drag: none;
+                    -khtml-user-drag: none;
+                    pointer-events: auto;
+                }
+
+                .handle-left-top {
+                    left: -4px;
+                    top: -4px;
+                    cursor: nw-resize;
+                }
+
+                .handle-center-top {
+                    left: calc(50% - 5px);
+                    top: -4px;
+                    cursor: ns-resize;
+                }
+
+                .handle-right-top {
+                    right: -4px;
+                    top: -4px;
+                    cursor: ne-resize;
+                }
+
+                .handle-left-middle {
+                    left: -4px;
+                    top: calc(50% - 5px);
+                    cursor: ew-resize;
+                }
+
+                .handle-right-middle {
+                    right: -4px;
+                    top: calc(50% - 5px);
+                    cursor: ew-resize;
+                }
+
+                .handle-left-bottom {
+                    left: -4px;
+                    bottom: -4px;
+                    cursor: ne-resize;
+                }
+
+                .handle-center-bottom {
+                    left: calc(50% - 5px);
+                    bottom: -4px;
+                    cursor: ns-resize;
+                }
+
+                .handle-right-bottom {
+                    right: -4px;
+                    bottom: -4px;
+                    cursor: se-resize;
+                }
+
+                .handle-pointer-events-none .handle-corner {
+                    pointer-events: none;
+                }
+
+                .single-image-select img::selection {
+                    background-color: transparent;
+                }
+            </style>
+        </head>
+
+        <body style="height: 100%; margin: 0; box-sizing: border-box; overflow: hidden;">
+            <div id="container" class="container" style="width: 100%; height: 100%; box-sizing: border-box; overflow: auto;">
+                <div id="editor" class="editor" contenteditable="true" spellcheck="false" style="min-width: 100%; min-height: 100%; padding: 4px 8px; box-sizing: border-box;"></div>
+
+                <div id="handle" class="handle">
+                    <div id="handle-rect" class="handle-rect"></div>
+                    <div id="handle-left-top" class="handle-corner handle-left-top"></div>
+                    <div id="handle-center-top" class="handle-corner handle-center-top"></div>
+                    <div id="handle-right-top" class="handle-corner handle-right-top"></div>
+                    <div id="handle-left-middle" class="handle-corner handle-left-middle"></div>
+                    <div id="handle-right-middle" class="handle-corner handle-right-middle"></div>
+                    <div id="handle-left-bottom" class="handle-corner handle-left-bottom"></div>
+                    <div id="handle-center-bottom" class="handle-corner handle-center-bottom"></div>
+                    <div id="handle-right-bottom" class="handle-corner handle-right-bottom"></div>
+                </div>
+            </div>
+        </body>
+        </html>
+        '>
+        </iframe>
+    </div>
+</body>
+</html>
