@@ -868,26 +868,31 @@ class Editor {
     // フォーマットを削除
     removeFormat() {
         this.command("removeFormat", "formatRemove", null);
+        this.resetUndo();
     }
 
     // 太字
     bold() {
         this.command("bold", "formatBold", null);
+        this.resetUndo();
     }
 
     // 斜体
     italic() {
         this.command("italic", "formatItalic", null);
+        this.resetUndo();
     }
 
     // 下線
     underline() {
         this.command("underline", "formatUnderline", null);
+        this.resetUndo();
     }
 
     // 打ち消し線
     strikeThrough() {
         this.command("strikeThrough", "formatStrikeThrough", null);
+        this.resetUndo();
     }
 
     // フォントサイズを設定
