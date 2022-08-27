@@ -723,47 +723,43 @@ class Editor {
 
     // 変更をリドゥ
     redoMutations(mutations) {
-        try {
-            for (let mutation of mutations) {
-                const type = mutation.type.toLowerCase();
+        for (let mutation of mutations) {
+            const type = mutation.type.toLowerCase();
 
-                if ("characterdata" === type) {
-                    if (mutation.target)
-                        mutation.target.textContent = mutation._currentValue;
-                } else if ("childlist" === type) {
-                    for (let node of mutation.removedNodes) {
-                        node.remove();
-                    }
+            if ("characterdata" === type) {
+                if (mutation.target)
+                    mutation.target.textContent = mutation._currentValue;
+            } else if ("childlist" === type) {
+                for (let node of mutation.removedNodes) {
+                    node.remove();
+                }
 
-                    for (let node of mutation.addedNodes) {
-                        if (mutation.target) {
-                            if (mutation.previousSibling) {
-                                let parent = null;
-                                if (mutation.previousSibling.nextSibling)
-                                    parent = mutation.previousSibling.nextSibling.parentNode;
-                                else
-                                    parent = mutation.previousSibling.parentNode;
-
-                                if (parent)
-                                    parent.insertBefore(node, mutation.previousSibling.nextSibling);
-                            } else if (mutation.nextSibling) {
-                                if (mutation.nextSibling.parentNode)
-                                    mutation.nextSibling.parentNode.insertBefore(node, mutation.nextSibling);
-                            } else
-                                mutation.target.appendChild(node);
-                        }
-                    }
-                } else if ("attributes" === type) {
+                for (let node of mutation.addedNodes) {
                     if (mutation.target) {
-                        if (mutation._currentValue)
-                            mutation.target.setAttribute(mutation.attributeName, mutation._currentValue);
-                        else
-                            mutation.target.removeAttribute(mutation.attributeName);
+                        if (mutation.previousSibling) {
+                            let parent = null;
+                            if (mutation.previousSibling.nextSibling)
+                                parent = mutation.previousSibling.nextSibling.parentNode;
+                            else
+                                parent = mutation.previousSibling.parentNode;
+
+                            if (parent)
+                                parent.insertBefore(node, mutation.previousSibling.nextSibling);
+                        } else if (mutation.nextSibling) {
+                            if (mutation.nextSibling.parentNode)
+                                mutation.nextSibling.parentNode.insertBefore(node, mutation.nextSibling);
+                        } else
+                            mutation.target.appendChild(node);
                     }
                 }
+            } else if ("attributes" === type) {
+                if (mutation.target) {
+                    if (mutation._currentValue)
+                        mutation.target.setAttribute(mutation.attributeName, mutation._currentValue);
+                    else
+                        mutation.target.removeAttribute(mutation.attributeName);
+                }
             }
-        } catch (e) {
-            alert(e)
         }
     }
 
