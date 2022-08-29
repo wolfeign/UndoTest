@@ -50,16 +50,21 @@
         <html style="height: 100%;">
         <head>
             <style>
+                :root {
+                    --editor-cursor: unset;
+                    --editor-image-cursor: grab;
+                }
+
+                body * {
+                    cursor: var(--editor-cursor);
+                }
+
                 .editor:focus {
                     outline: none;
                 }
 
                 .editor img {
-                    cursor: grab;
-                }
-
-                .editor-image-default-cursor img {
-                    cursor: unset;
+                    cursor: var(--editor-image-cursor);
                 }
 
                 .handle {
