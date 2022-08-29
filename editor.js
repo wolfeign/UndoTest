@@ -1,8 +1,35 @@
 // エディタのアンドゥ・リドゥのテストを目的としたプログラム
-// 制作者:wolfeign(@wolfeign)
-// 制作日:2022/8/26(Fri)
 // 
-// ライセンス:MITライセンス
+// バージョン : 1.01
+// 制作者　　 : wolfeign(@wolfeign)
+// 公開日　　 : 2022/8/26(Fri)
+// ライセンス : MITライセンス
+
+// バージョン履歴
+// 
+// 1.00 [2022/08/26(Fri)] - 公開
+// 
+// 1.01 [2022/08/29(Mon)] - バグ修正
+/*  ・IME入力時にリドゥ可能だった場合、正しくアンドゥできないバグを修正
+    ・日本語のアンドゥ名を得られるようにした
+    ・リサイズ時のカーソル変更をクラスではなくカスタムプロパティにした
+
+    ・追加・変更された変数とメソッド
+      SelectionRange.isSelectNone()
+      Editor.isFirstIme
+      Editor.imeUndoItem
+      Editor.getRangeRect(range) -> Editor.getRangeRect(range, ignoreModify)
+      Editor.scrollToSelection() -> Editor.scrollToSelection(ignoreModify)
+      Editor.onMutate(mutations, selection) -> IME入力時のバグに伴い加筆
+      Editor.rememberMutationValue(mutations)
+      Editor.pushImeUndoItem()
+      Editor.pushImeUndoItemContinuous()
+      Editor.pushImeUndo()
+      Editor.setUndoType(type)
+      Editor.getUndoName() -> getUndoType()
+      Editor.getRedoName() -> getRedoType()
+      Editor.getJapaneseUndoName(type)
+*/
 
 
 // 選択範囲
@@ -31,6 +58,11 @@ class SelectionRange {
             return false;
 
         return true;
+    }
+
+    // 何も選択されてない状態か
+    isSelectNone() {
+        return this.startContainer === this.endContainer && this.startOffset === this.endOffset;
     }
 }
 
@@ -92,6 +124,11 @@ class Editor {
         this.inputType = "";
         // ユーザーにより入力されたか
         this.inputByUser = false;
+
+        // IME入力開始直後かどうか
+        this.isFirstIme = false;
+        // IME入力中のUndoItem
+        this.imeUndoItem = null;
 
         // UndoItemのリスト
         this.undoList = [];
@@ -173,11 +210,9 @@ class Editor {
             this.grappingElement = null;
             this.grappingHandle = null;
 
-            this.iframe.contentDocument.body.style.cursor = "";
-            this.editor.classList.remove("editor-image-default-cursor");
+            this.iframe.contentDocument.documentElement.style.setProperty("--editor-cursor", "unset");
+            this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", "grab");
             this.handle.classList.remove("handle-pointer-events-none");
-
-            this.ignoreModify();
         });
 
         // マウスが移動したとき
@@ -187,11 +222,9 @@ class Editor {
                     this.grappingElement = null;
                     this.grappingHandle = null;
 
-                    this.iframe.contentDocument.body.style.cursor = "";
-                    this.editor.classList.remove("editor-image-default-cursor");
+                    this.iframe.contentDocument.documentElement.style.setProperty("--editor-cursor", "unset");
+                    this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", "grab");
                     this.handle.classList.remove("handle-pointer-events-none");
-
-                    this.ignoreModify();
                 }
 
                 return;
@@ -301,14 +334,24 @@ class Editor {
 
         // IMEの入力開始
         this.editor.addEventListener("compositionstart", (event) => {
+            // なにも選択されてなければ専用のリストに追加していき、IME入力完了後にアンドゥリスト追加する
+            const selection = this.getSelectionRange();
+            if (selection && selection.isSelectNone())
+                this.isFirstIme = true;
+
             this.resetUndo();
         }, false);
 
         // IMEの入力終了後
         this.editor.addEventListener("compositionend", (event) => {
-            // 文字が入力されなかったもしくはキャンセルされた場合、直前のアンドゥを削除しておく
-            if (0 === event.data.length)
-                this.removePrevUndoItem();
+            if (this.imeUndoItem) {
+                // 文字が入力された場合のみアンドゥリストに追加する
+                // (入力がキャンセルされた場合も event.data.lengthはゼロになる)
+                if (0 !== event.data.length)
+                    this.pushImeUndo(this.imeUndoItem);
+
+                this.imeUndoItem = null;
+            }
 
             this.resetUndo();
         }, false);
@@ -363,10 +406,11 @@ class Editor {
     // キャレットの位置を得る
     // キャレットが左端にあるとき矩形の位置がゼロになるので一時ノードを追加して位置を求めている
     // 参考:https://stackoverflow.com/questions/50022681/range-getboundingclientrect-returns-zero-for-all-values-after-selecting-a-node
-    getRangeRect(range) {
+    getRangeRect(range, ignoreModify) {
         let rect = range.getBoundingClientRect();
         if (range.collapsed && 0 === rect.top && 0 === rect.left) {
-            this.ignoreModify();
+            if (ignoreModify)
+                this.ignoreModify();
 
             const node = this.iframe.contentDocument.createTextNode('\ufeff');
             range.insertNode(node);
@@ -378,12 +422,12 @@ class Editor {
     }
 
     // 選択範囲までスクロール
-    scrollToSelection() {
+    scrollToSelection(ignoreModify) {
         const selection = this.iframe.contentWindow.getSelection();
 
         if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0).cloneRange();
-            const rect = this.getRangeRect(range);
+            const rect = this.getRangeRect(range, ignoreModify);
 
             if (rect.right >= this.container.clientWidth)
                 this.container.scrollLeft += rect.right - this.container.clientWidth;
@@ -499,13 +543,13 @@ class Editor {
         {
             const fontsize = this.getCursorFontSize();
 
-            const fontsizeElement = document.getElementById("fontsize");
-            if (fontsizeElement)
-                fontsizeElement.value = fontsize;
+            const fontSizeElement = document.getElementById("fontsize");
+            if (fontSizeElement)
+                fontSizeElement.value = fontsize;
 
-            const fontsizeLabelElement = document.getElementById("fontsize-text");
-            if (fontsizeLabelElement)
-                fontsizeLabelElement.textContent = parseFloat(fontsize.toFixed(3)) + "px";
+            const fontSizeTextElement = document.getElementById("fontsize-text");
+            if (fontSizeTextElement)
+                fontSizeTextElement.textContent = parseFloat(fontsize.toFixed(3)) + "px";
         }
     }
 
@@ -516,8 +560,25 @@ class Editor {
             return;
         }
 
+        // IME入力中は専用のリストにアンドゥアイテムを追加していく
+        if (this.isFirstIme) {
+            this.isFirstIme = false;
+
+            this.pushImeUndoItem(mutations, this.selection);   // 引数のselectionではない
+            this.pushImeUndoItemContinuous(null, this.getSelectionRange());
+
+            return;
+        } else if (this.imeUndoItem) {
+            this.pushImeUndoItemContinuous(mutations, null);
+            this.pushImeUndoItemContinuous(null, this.getSelectionRange());
+
+            return;
+        }
+
         const type = this.inputType.toLowerCase();
         if (this.inputByUser && "insertfromdrop" === type && this.isSameUndoType("deleteByDrag")) {
+            this.setUndoType("insertFromDrop");
+
             this.pushUndoContinuous(mutations, null);
             this.pushUndoContinuous(null, this.getSelectionRange());
 
@@ -549,8 +610,8 @@ class Editor {
         this.isFirstUndo = true;
     }
 
-    // アンドゥを追加
-    pushUndo(mutations, selection) {
+    // 古い値を記憶しておく
+    rememberMutationValue(mutations) {
         if (mutations) {
             for (let mutation of mutations) {
                 const type = mutation.type.toLowerCase();
@@ -567,9 +628,14 @@ class Editor {
             }
         }
 
+        return mutations;
+    }
+
+    // アンドゥを追加
+    pushUndo(mutations, selection) {
         this.undoList.length = this.undoPosition + 1;
         this.undoList[this.undoPosition] = new UndoItem(this.inputType);
-        this.undoList[this.undoPosition].pushMutation(mutations, selection);
+        this.undoList[this.undoPosition].pushMutation(this.rememberMutationValue(mutations), selection);
         this.undoPosition++;
 
         this.onModifyUndo();
@@ -577,23 +643,27 @@ class Editor {
 
     // アンドゥを連続的に追加
     pushUndoContinuous(mutations, selection) {
-        if (mutations) {
-            for (let mutation of mutations) {
-                const type = mutation.type.toLowerCase();
+        this.undoList[this.undoPosition - 1].pushMutation(this.rememberMutationValue(mutations), selection);
 
-                if ("characterdata" === type) {
-                    if (mutation.target)
-                        mutation._currentValue = mutation.target.textContent;
+        this.onModifyUndo();
+    }
 
-                    mutation._oldValue = mutation.oldValue;
-                } else if ("attributes" === type) {
-                    if (mutation.target)
-                        mutation._currentValue = mutation.target.getAttribute(mutation.attributeName);
-                }
-            }
-        }
+    // IMEのアンドゥを追加
+    pushImeUndoItem(mutations, selection) {
+        this.imeUndoItem = new UndoItem(this.inputType);
+        this.imeUndoItem.pushMutation(this.rememberMutationValue(mutations), selection);
+    }
 
-        this.undoList[this.undoPosition - 1].pushMutation(mutations, selection);
+    // IMEのアンドゥを連続的に追加
+    pushImeUndoItemContinuous(mutations, selection) {
+        this.imeUndoItem.pushMutation(this.rememberMutationValue(mutations), selection);
+    }
+
+    // IMEアンドゥアイテムを追加
+    pushImeUndo(imeUndoItem) {
+        this.undoList.length = this.undoPosition + 1;
+        this.undoList[this.undoPosition] = imeUndoItem;
+        this.undoPosition++;
 
         this.onModifyUndo();
     }
@@ -633,7 +703,7 @@ class Editor {
 
         this.setHandleRect(this.selectedElement);
 
-        this.scrollToSelection();
+        this.scrollToSelection(true);
 
         this.onModifyUndo();
     }
@@ -716,7 +786,7 @@ class Editor {
 
         this.undoPosition++;
 
-        this.scrollToSelection();
+        this.scrollToSelection(true);
 
         this.onModifyUndo();
     }
@@ -804,31 +874,121 @@ class Editor {
         return this.undoList.length !== this.undoPosition;
     }
 
-    // アンドゥ名を得る
-    getUndoName() {
+    // 現在のアンドゥの入力タイプを変更
+    setUndoType(type) {
+        if (0 !== this.undoPosition)
+            this.undoList[this.undoPosition - 1].type = type;
+    }
+
+    // アンドゥの入力タイプを得る
+    getUndoType() {
         if (0 === this.undoPosition)
             return "";
 
         return this.undoList[this.undoPosition - 1].type;
     }
 
-    // リドゥ名を得る
-    getRedoName() {
+    // リドゥの入力タイプを得る
+    getRedoType() {
         if (this.undoList.length === this.undoPosition)
             return "";
 
         return this.undoList[this.undoPosition].type;
     }
 
+    // 日本語のアンドゥ名を得る
+    getJapaneseUndoName(type) {
+        if (!type)
+            return "";
+
+        const type2 = type.toLowerCase();
+        if ("inserttext" === type2)
+            return "文字の入力";
+        else if ("insertreplacementtext" === type2 || "insertfromyank" === type2)
+            return "置換";
+        else if ("insertlinebreak" === type2 || "insertparagraph" === type2)
+            return "改行";
+        else if ("insertorderedlist" === type2)
+            return "番号付きリストの挿入";
+        else if ("insertunorderedlist" === type2)
+            return "番号無しリストの挿入";
+        else if ("inserthorizontalrule" === type2)
+            return "段落区切り罫線の挿入";
+        else if ("insertfromdrop" === type2)
+            return "ドラッグ&ドロップ";
+        else if ("insertfrompaste" === type2 || "insertfrompastessquotation" === type2)
+            return "貼り付け";
+        else if ("inserttranspose" === type2)
+            return "転置";
+        else if ("insertcompositiontext" === type2 || "insertfromcomposition" === type2 || "deletebycomposition" === type2)
+            return "IME入力";
+        else if ("insertlink" === type2)
+            return "リンクの挿入";
+        else if ("deletebycut" === type2)
+            return "切り取り";
+        else if (type2.startsWith("delete"))
+            return "削除";
+        else if ("formatbold" === type2)
+            return "太字";
+        else if ("formatitalic" === type2)
+            return "斜体";
+        else if ("formatunderline" === type2)
+            return "下線";
+        else if ("formatstrikethrough" === type2)
+            return "打ち消し線";
+        else if ("formatsuperscript" === type2)
+            return "上付き文字";
+        else if ("formatsubscript" === type2)
+            return "下付き文字";
+        else if ("formatjustifyfull" === type2)
+            return "両端揃え";
+        else if ("formatjustifycenter" === type2)
+            return "中央揃え";
+        else if ("formatjustifyright" === type2)
+            return "右端揃え";
+        else if ("formatjustifyleft" === type2)
+            return "左端揃え";
+        else if ("formatindent" === type2)
+            return "インデント";
+        else if ("formatoutdent" === type2)
+            return "インデントの解除";
+        else if ("formatremove" === type2)
+            return "書体の初期化";
+        else if ("formatsetblocktextdirection" === type2)
+            return "ブロック方向の設定";
+        else if ("formatsetinlinetextdirection" === type2)
+            return "行内方向の設定";
+        else if ("formatbackcolor" === type2)
+            return "背景色の変更";
+        else if ("formatfontcolor" === type2)
+            return "文字色の変更";
+        else if ("formatfontname" === type2)
+            return "フォントの変更";
+        else if ("formatfontsize" === type2)
+            return "フォントサイズの変更";
+        else if ("resizeimage" === type2)
+            return "画像サイズの変更";
+        else if ("resizetable" === type2)
+            return "テーブルのサイズ変更";
+        else if ("resizetablecell" === type2)
+            return "テーブルセルのサイズ変更";
+
+        return type;
+    }
+
     // アンドゥ状態に変化があったときに呼び出される
     onModifyUndo() {
         const undoElement = document.getElementById("undo");
-        if (undoElement)
+        if (undoElement) {
             undoElement.classList.toggle("unenabled", !this.canUndo());
+            undoElement.title = this.getJapaneseUndoName(this.getUndoType());
+        }
 
         const redoElement = document.getElementById("redo");
-        if (redoElement)
+        if (redoElement) {
             redoElement.classList.toggle("unenabled", !this.canRedo());
+            redoElement.title = this.getJapaneseUndoName(this.getRedoType());
+        }
     }
 
     // コマンドを実行
@@ -842,8 +1002,7 @@ class Editor {
 
         this.iframe.contentDocument.execCommand(commandid, false, value);
 
-        // 選択範囲までスクロール
-        this.scrollToSelection();
+        this.scrollToSelection(false);
     }
 
     // クリア
@@ -859,6 +1018,8 @@ class Editor {
         this.resetUndo();
 
         this.showHandle(false);
+
+        this.scrollToSelection(false);
     }
 
     // フォーマットを削除
@@ -913,7 +1074,7 @@ class Editor {
         let node = null;
 
         const selection = this.iframe.contentWindow.getSelection();
-        if (selection.rangeCount > 0) {
+        if (selection && selection.rangeCount > 0) {
             node = selection.getRangeAt(0).startContainer;
 
             if (Node.TEXT_NODE === node.nodeType)
@@ -998,26 +1159,26 @@ class Editor {
                 this.inputType = "resizeTableCell";
 
             // ドラッグ中は一時的にiframe全体のカーソルを変更しておく
+            let cursor = "unset";
             if (-1 !== this.grappingHandle.indexOf("left")) {
                 if (-1 !== this.grappingHandle.indexOf("top"))
-                    this.iframe.contentDocument.body.style.cursor = "nwse-resize";
+                    cursor = "nwse-resize";
                 else if (-1 !== this.grappingHandle.indexOf("bottom"))
-                    this.iframe.contentDocument.body.style.cursor = "nesw-resize";
+                    cursor = "nesw-resize";
                 else
-                    this.iframe.contentDocument.body.style.cursor = "ew-resize";
+                    cursor = "ew-resize";
             } else if (-1 !== this.grappingHandle.indexOf("right")) {
                 if (-1 !== this.grappingHandle.indexOf("top"))
-                    this.iframe.contentDocument.body.style.cursor = "nesw-resize";
+                    cursor = "nesw-resize";
                 else if (-1 !== this.grappingHandle.indexOf("bottom"))
-                    this.iframe.contentDocument.body.style.cursor = "nwse-resize";
+                    cursor = "nwse-resize";
                 else
-                    this.iframe.contentDocument.body.style.cursor = "ew-resize";
+                    cursor = "ew-resize";
             } else {
-                this.iframe.contentDocument.body.style.cursor = "ns-resize";
+                cursor = "ns-resize";
             }
-            this.editor.classList.add("editor-image-default-cursor");
-
-            this.ignoreModify();
+            this.iframe.contentDocument.documentElement.style.setProperty("--editor-cursor", cursor);
+            this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", cursor);
         }
     }
 
@@ -1079,9 +1240,9 @@ function onFontColor(color) {
 function onFontSize(size) {
     editor.setFontSize(size);
 
-    const fontsizeLabelElement = document.getElementById("fontsize-text");
-    if (fontsizeLabelElement)
-        fontsizeLabelElement.textContent = size + "px";
+    const fontSizeTextElement = document.getElementById("fontsize-text");
+    if (fontSizeTextElement)
+        fontSizeTextElement.textContent = size + "px";
 
     editor.focus();
 }
