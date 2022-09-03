@@ -1,35 +1,45 @@
 // エディタのアンドゥ・リドゥのテストを目的としたプログラム
 // 
-// バージョン : 1.01
+// バージョン : 1.04
 // 制作者　　 : wolfeign(@wolfeign)
-// 公開日　　 : 2022/8/26(Fri)
+// 公開日　　 : 2022/08/26(Fri)
+// 更新日　　 : 2022/09/03(Sat)
 // ライセンス : MITライセンス
 
-// バージョン履歴
+// 【バージョン履歴】
 // 
 // 1.00 [2022/08/26(Fri)] - 公開
 // 
+// 
 // 1.01 [2022/08/29(Mon)] - バグ修正
-/*  ・IME入力時にリドゥ可能だった場合、正しくアンドゥできないバグを修正
-    ・日本語のアンドゥ名を得られるようにした
-    ・リサイズ時のカーソル変更をクラスではなくカスタムプロパティにした
-
-    ・追加・変更された変数とメソッド
-      SelectionRange.isSelectNone()
-      Editor.isFirstIme
-      Editor.imeUndoItem
-      Editor.getRangeRect(range) -> Editor.getRangeRect(range, ignoreModify)
-      Editor.scrollToSelection() -> Editor.scrollToSelection(ignoreModify)
-      Editor.onMutate(mutations, selection) -> IME入力時のバグに伴い加筆
-      Editor.rememberMutationValue(mutations)
-      Editor.pushImeUndoItem()
-      Editor.pushImeUndoItemContinuous()
-      Editor.pushImeUndo()
-      Editor.setUndoType(type)
-      Editor.getUndoName() -> getUndoType()
-      Editor.getRedoName() -> getRedoType()
-      Editor.getJapaneseUndoName(type)
-*/
+// 
+//  ・IME入力時にリドゥ可能だった場合、正しくアンドゥできないバグを修正
+//  ・日本語のアンドゥ名を得られるようにした
+//  ・リサイズ時のカーソル変更をクラスではなくカスタムプロパティにした
+// 
+// 
+// 1.02 [2022/08/31(Wed)] - 微修正
+// 
+//  ・エディタの選択範囲が空かどうかの判定に自分のコードではなくRangeのcollapsedを使用するようにした
+//  ・そのため SelectionRange.isSelectNone()は不要に
+// 
+// 
+// 1.03 [2022/09/01(Thu)] - 微修正
+// 
+//  ・dragendイベントをdropendと記述ミスしていたのを修正
+//  ・画像をクリックしたときカーソルを掴む形状にした
+//  ・要素をつかんでいる間はキー入力を無視するようにした
+//
+//  ・キャレットが文頭にある場合 Editor.getRangeRect()が正常な値を返さないことがあるため修正
+// 
+// 
+// 1.04 [2022/09/03(Sat)] - 自動スクロールと大幅修正
+// 
+//  ・画像およびテーブルをリサイズ中にマウスが画面外に出た場合、一定間隔で自動スクロールするようにした
+//  ・新たにResizeUndoItemクラスを作成。UndoItemの派生クラスで、リサイズのアンドゥ・リドゥを担当する
+//  ・UndoItemクラスとMutationItemにundo()とredo()のメソッドを実装
+//  ・リサイズ中に右クリックメニューを表示した場合リサイズを中断するようにした
+//  ・Editorに3種類の定数を追加
 
 
 // 選択範囲
@@ -59,11 +69,6 @@ class SelectionRange {
 
         return true;
     }
-
-    // 何も選択されてない状態か
-    isSelectNone() {
-        return this.startContainer === this.endContainer && this.startOffset === this.endOffset;
-    }
 }
 
 // 変更アイテム
@@ -74,6 +79,116 @@ class MutationItem {
 
         // 選択範囲
         this.selection = selection;
+    }
+
+    // アンドゥ
+    undo(iframe) {
+        if (this.mutations) {
+            const mutations = this.mutations.slice();
+
+            mutations.reverse();
+            this.undoMutations(mutations);
+        }
+
+        Editor.setSelection(iframe, this.selection);
+    }
+
+    // 変更をアンドゥ
+    undoMutations(mutations) {
+        for (let mutation of mutations) {
+            const type = mutation.type.toLowerCase();
+
+            if ("characterdata" === type) {
+                if (mutation.target)
+                    mutation.target.textContent = mutation._oldValue;
+            } else if ("childlist" === type) {
+                const nodes1 = Array.from(mutation.addedNodes).slice();
+                nodes1.reverse();
+
+                for (let node of nodes1) {
+                    node.remove();
+                }
+
+                const nodes2 = Array.from(mutation.removedNodes).slice();
+                nodes2.reverse();
+
+                for (let node of nodes2) {
+                    if (mutation.target) {
+                        if (mutation.previousSibling) {
+                            let parent = null;
+                            if (mutation.previousSibling.nextSibling)
+                                parent = mutation.previousSibling.nextSibling.parentNode;
+                            else
+                                parent = mutation.previousSibling.parentNode;
+
+                            if (parent)
+                                parent.insertBefore(node, mutation.previousSibling.nextSibling);
+                        } else if (mutation.nextSibling) {
+                            if (mutation.nextSibling.parentNode)
+                                mutation.nextSibling.parentNode.insertBefore(node, mutation.nextSibling);
+                        } else
+                            mutation.target.appendChild(node);
+                    }
+                }
+            } else if ("attributes" === type) {
+                if (mutation.target) {
+                    if (mutation.oldValue)
+                        mutation.target.setAttribute(mutation.attributeName, mutation.oldValue);
+                    else
+                        mutation.target.removeAttribute(mutation.attributeName);
+                }
+            }
+        }
+    }
+
+    // リドゥ
+    redo(iframe) {
+        Editor.setSelection(iframe, this.selection);
+
+        if (this.mutations)
+            this.redoMutations(this.mutations);
+    }
+
+    // 変更をリドゥ
+    redoMutations(mutations) {
+        for (let mutation of mutations) {
+            const type = mutation.type.toLowerCase();
+
+            if ("characterdata" === type) {
+                if (mutation.target)
+                    mutation.target.textContent = mutation._currentValue;
+            } else if ("childlist" === type) {
+                for (let node of mutation.removedNodes) {
+                    node.remove();
+                }
+
+                for (let node of mutation.addedNodes) {
+                    if (mutation.target) {
+                        if (mutation.previousSibling) {
+                            let parent = null;
+                            if (mutation.previousSibling.nextSibling)
+                                parent = mutation.previousSibling.nextSibling.parentNode;
+                            else
+                                parent = mutation.previousSibling.parentNode;
+
+                            if (parent)
+                                parent.insertBefore(node, mutation.previousSibling.nextSibling);
+                        } else if (mutation.nextSibling) {
+                            if (mutation.nextSibling.parentNode)
+                                mutation.nextSibling.parentNode.insertBefore(node, mutation.nextSibling);
+                        } else
+                            mutation.target.appendChild(node);
+                    }
+                }
+            } else if ("attributes" === type) {
+                if (mutation.target) {
+                    if (mutation._currentValue)
+                        mutation.target.setAttribute(mutation.attributeName, mutation._currentValue);
+                    else
+                        mutation.target.removeAttribute(mutation.attributeName);
+                }
+            }
+        }
     }
 }
 
@@ -91,10 +206,75 @@ class UndoItem {
     pushMutation(mutations, selection) {
         this.mutationList.push(new MutationItem(mutations, selection));
     }
+
+    // アンドゥ
+    undo(iframe) {
+        for (let i = this.mutationList.length - 1; i >= 0; i--) {
+            this.mutationList[i].undo(iframe);
+        }
+    }
+
+    // リドゥ
+    redo(iframe) {
+        for (let item of this.mutationList) {
+            item.redo(iframe);
+        }
+    }
+}
+
+// リサイズアンドゥ
+class ResizeUndoItem extends UndoItem {
+    constructor(type, element, style, selection) {
+        super(type);
+
+        // 要素
+        this.element = element;
+
+        // 初期のスタイル(nullの可能性もある)
+        this.firstStyle = style;
+
+        // 現在のスタイル
+        this.style = null;
+
+        // 選択範囲
+        this.selection = selection;
+    }
+
+    // アンドゥ
+    undo(iframe) {
+        Editor.setElementStyle(this.element, this.firstStyle);
+        Editor.setSelection(iframe, this.selection);
+    }
+
+    // リドゥ
+    redo(iframe) {
+        Editor.setSelection(iframe, this.selection);
+        Editor.setElementStyle(this.element, this.style);
+    }
+
+    // リサイズされたときに呼び出される
+    onResize() {
+        this.style = this.element.getAttribute("style");
+    }
 }
 
 // エディタクラス
 class Editor {
+    // 要素の最小サイズ
+    static get ELEMENT_MIN_SIZE() {
+        return 10;
+    }
+
+    // 自動スクロールの間隔
+    static get AUTO_SCROLL_INTERVAL() {
+        return 15;
+    }
+
+    // 自動スクロールの速さ(小数可)
+    static get AUTO_SCROLL_SPEED() {
+        return 0.5;
+    }
+
     constructor() {
         this.iframe = null;
         this.container = null;
@@ -108,17 +288,25 @@ class Editor {
         // 選択中の要素
         this.selectedElement = null;
         // つかんでいる要素
-        this.grappingElement = null;
+        this.grabbingElement = null;
         // つかんでいるハンドル
-        this.grappingHandle = null;
+        this.grabbingHandle = null;
         // つかんだ位置
-        this.grappingFirstX = 0;
-        this.grappingFirstY = 0;
+        this.grabbingFirstX = 0;
+        this.grabbingFirstY = 0;
         // つかんだ要素の位置とサイズ
-        this.grappingFirstLeft = 0;
-        this.grappingFirstTop = 0;
-        this.grappingFirstWidth = 0;
-        this.grappingFirstHeight = 0;
+        this.grabbingFirstLeft = 0;
+        this.grabbingFirstTop = 0;
+        this.grabbingFirstWidth = 0;
+        this.grabbingFirstHeight = 0;
+        // つかんだときのスクロール位置
+        this.grabbingFirstScrollLeft = 0;
+        this.grabbingFirstScrollTop = 0;
+        // つかんでいる間のタイマー
+        this.grabbingTimer = null;
+        // つかんでいいる間のマウスカーソルの位置
+        this.grabbingCursorX = 0;
+        this.grabbingCursorY = 0;
 
         // 入力タイプ
         this.inputType = "";
@@ -154,15 +342,16 @@ class Editor {
         this.editor = iframe.contentDocument.getElementById("editor");
         this.handle = iframe.contentDocument.getElementById("handle");
 
+        if (!this.container || !this.editor || !this.handle)
+            return;
+
         // CSSを使用する
         iframe.contentDocument.execCommand("styleWithCSS", false, true);
 
         // スクロールイベント
-        if (this.container) {
-            this.container.addEventListener("scroll", () => {
-                this.setHandleRect(this.selectedElement);
-            }, false);
-        }
+        this.container.addEventListener("scroll", () => {
+            this.setHandleRect(this.selectedElement);
+        }, false);
 
         // エディタのサイズ変更を監視
         new ResizeObserver(() => {
@@ -171,6 +360,13 @@ class Editor {
 
         // キーの押下
         iframe.contentWindow.addEventListener("keydown", (event) => {
+            // 要素をつかんでいる間はキー入力を無視する
+            if (this.isGrabbing()) {
+                event.preventDefault();
+                event.stopPropagation();
+                return false;
+            }
+
             const key = event.key.toLowerCase();
             if ("z" === key) {
                 if (event.ctrlKey && !event.shiftKey && !event.altKey) {
@@ -189,9 +385,8 @@ class Editor {
 
         // マウスが押されたとき
         iframe.contentWindow.addEventListener("mousedown", (event) => {
-            this.handle.classList.add("handle-pointer-events-none");
-
             const element = iframe.contentDocument.elementFromPoint(event.pageX, event.pageY);
+
             if (element && element.tagName) {
                 if ("img" === element.tagName.toLowerCase()) {
                     if (0 === event.button) {
@@ -199,6 +394,7 @@ class Editor {
                         this.selectImage(element);
 
                         this.iframe.contentDocument.body.classList.add("single-image-select");
+                        this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", "grabbing");
                         this.ignoreModify();
                     }
                 }
@@ -207,99 +403,96 @@ class Editor {
 
         // マウスが離されたとき
         iframe.contentWindow.addEventListener("mouseup", (event) => {
-            this.grappingElement = null;
-            this.grappingHandle = null;
+            if (this.releaseGrabbing())
+                this.resetUndo();
+        });
 
-            this.iframe.contentDocument.documentElement.style.setProperty("--editor-cursor", "unset");
-            this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", "grab");
-            this.handle.classList.remove("handle-pointer-events-none");
+        // マウスが離されたとき
+        document.addEventListener("mouseup", (event) => {
+            if (this.releaseGrabbing())
+                this.resetUndo();
         });
 
         // マウスが移動したとき
-        iframe.contentWindow.addEventListener("mousemove", (event) => {
+        function onMouseMove(editor, event, offsetX, offsetY) {
             if (0 === event.buttons & 1) {
-                if (this.grappingElement && this.grappingHandle) {
-                    this.grappingElement = null;
-                    this.grappingHandle = null;
+                if (editor.releaseGrabbing())
+                    editor.resetUndo();
 
-                    this.iframe.contentDocument.documentElement.style.setProperty("--editor-cursor", "unset");
-                    this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", "grab");
-                    this.handle.classList.remove("handle-pointer-events-none");
-                }
-
-                return;
+                return false;
             }
 
-            if (this.grappingElement && this.grappingHandle) {
-                const rect = this.grappingElement.getBoundingClientRect();
-                let grappingWidth = rect.width;
-                let grappingHeight = rect.height;
+            if (editor.isGrabbing()) {
+                const x = event.pageX - offsetX;
+                const y = event.pageY - offsetY;
 
-                if (-1 !== this.grappingHandle.indexOf("left"))
-                    grappingWidth = this.grappingFirstX + this.grappingFirstWidth + (this.grappingFirstLeft - event.pageX);
-                else if (-1 !== this.grappingHandle.indexOf("right"))
-                    grappingWidth = this.grappingFirstX + event.pageX - this.grappingFirstLeft;
-                else
-                    grappingWidth = this.grappingFirstWidth;
+                editor.doResize(x + editor.container.scrollLeft - editor.grabbingFirstScrollLeft, y + editor.container.scrollTop - editor.grabbingFirstScrollTop);
 
-                if (-1 !== this.grappingHandle.indexOf("top"))
-                    grappingHeight = this.grappingFirstY + this.grappingFirstHeight + (this.grappingFirstTop - event.pageY);
-                else if (-1 !== this.grappingHandle.indexOf("bottom"))
-                    grappingHeight = this.grappingFirstY + event.pageY - this.grappingFirstTop;
-                else
-                    grappingHeight = this.grappingFirstHeight;
+                return true;
+            }
 
-                // 縦横比を固定
-                if ("img" === this.grappingElement.tagName.toLowerCase()) {
-                    if (0 !== this.grappingElement.naturalWidth && 0 !== this.grappingElement.naturalHeight) {
-                        const divideWH = this.grappingElement.naturalWidth / this.grappingElement.naturalHeight;
-                        const divideHW = this.grappingElement.naturalHeight / this.grappingElement.naturalWidth;
+            return false;
+        }
 
-                        if (-1 !== this.grappingHandle.indexOf("center"))
-                            grappingWidth = parseInt(grappingHeight * divideWH);
-                        else
-                            grappingHeight = parseInt(grappingWidth * divideHW);
+        // iframe外のマウス移動を捉える
+        document.addEventListener("mousemove", () => {
+            if (this.isGrabbing()) {
+                const rect = iframe.getBoundingClientRect();
 
-                        if (-1 !== this.grappingHandle.indexOf("middle"))
-                            grappingHeight = parseInt(grappingWidth * divideHW);
-                        else
-                            grappingWidth = parseInt(grappingHeight * divideWH);
+                this.grabbingCursorX = event.pageX;
+                this.grabbingCursorY = event.pageY;
 
-                        if (grappingWidth > grappingHeight) {
-                            grappingWidth = parseInt(grappingHeight * divideWH);
+                if (onMouseMove(this, event, rect.left, rect.top)) {
+                    // 要素をつかんでいるときにマウスがエディタ外に出た場合の自動スクロール
+                    if (!this.grabbingTimer) {
+                        this.grabbingTimer = setInterval(() => {
+                            if (!Editor.ptInRect(this.grabbingCursorX, this.grabbingCursorY, rect)) {
+                                const x = this.grabbingCursorX - rect.left;
+                                const y = this.grabbingCursorY - rect.top;
+                                let dx = 0;
+                                let dy = 0;
 
-                            if (grappingHeight > parseInt(rect.width * divideHW))
-                                grappingHeight = parseInt(rect.width * divideHW);
-                        } else {
-                            grappingHeight = parseInt(grappingWidth * divideHW);
+                                if (x < 0)
+                                    dx = Math.floor(x * Editor.AUTO_SCROLL_SPEED);
+                                else if (x > rect.right - rect.left)
+                                    dx = Math.floor((x - (rect.right - rect.left)) * Editor.AUTO_SCROLL_SPEED);
 
-                            if (grappingWidth > parseInt(rect.height * divideWH))
-                                grappingWidth = parseInt(rect.height * divideWH);
-                        }
+                                if (y < 0)
+                                    dy = Math.floor(y * Editor.AUTO_SCROLL_SPEED);
+                                else if (y > rect.bottom - rect.top)
+                                    dy = Math.floor((y - (rect.bottom - rect.top)) * Editor.AUTO_SCROLL_SPEED);
+
+                                if (0 !== dx || 0 !== dy) {
+                                    this.container.scrollLeft += dx;
+                                    this.container.scrollTop += dy;
+
+                                    this.doResize(x + this.container.scrollLeft - this.grabbingFirstScrollLeft, y + this.container.scrollTop - this.grabbingFirstScrollTop);
+                                }
+                            }
+                        }, Editor.AUTO_SCROLL_INTERVAL);
                     }
                 }
-
-                // 要素の最小サイズを10にしているが変更しても良い
-                if (grappingWidth < 10)
-                    grappingWidth = 10;
-
-                if (grappingHeight < 10)
-                    grappingHeight = 10;
-
-                this.setElementSize(this.grappingElement, grappingWidth, grappingHeight);
-
-                this.setHandleRect(this.grappingElement);
             }
-        });
+        }, false);
+
+        // マウスが移動したとき
+        iframe.contentWindow.addEventListener("mousemove", (event) => {
+            onMouseMove(this, event, 0, 0);
+
+            if (this.grabbingTimer) {
+                clearInterval(this.grabbingTimer);
+                this.grabbingTimer = null;
+            }
+        }, false);
 
         // ドラッグがESCキーなどによってキャンセルされた場合
-        iframe.contentWindow.addEventListener("dropend", () => {
-            this.handle.classList.remove("handle-pointer-events-none");
+        iframe.contentWindow.addEventListener("dragend", () => {
+            this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", "grab");
         }, false);
 
         // ドロップされたとき
         iframe.contentWindow.addEventListener("drop", () => {
-            this.handle.classList.remove("handle-pointer-events-none");
+            this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", "grab");
         }, false);
 
         // 選択が開始されたとき
@@ -332,12 +525,16 @@ class Editor {
             this.setHandleRect(this.selectedElement);
         }, false);
 
-        // IMEの入力開始
+        // IMEの入力開始時
         this.editor.addEventListener("compositionstart", (event) => {
             // なにも選択されてなければ専用のリストに追加していき、IME入力完了後にアンドゥリスト追加する
-            const selection = this.getSelectionRange();
-            if (selection && selection.isSelectNone())
-                this.isFirstIme = true;
+            const selection = iframe.contentWindow.getSelection();
+            if (selection && selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+
+                if (!range.collapsed)
+                    this.isFirstIme = true;
+            }
 
             this.resetUndo();
         }, false);
@@ -356,6 +553,18 @@ class Editor {
             this.resetUndo();
         }, false);
 
+        // 右クリックメニュー
+        document.addEventListener("contextmenu", (event) => {
+            if (this.releaseGrabbing())
+                this.resetUndo();
+        }, false);
+
+        // 右クリックメニュー
+        iframe.contentWindow.addEventListener("contextmenu", (event) => {
+            if (this.releaseGrabbing())
+                this.resetUndo();
+        }, false);
+
         // エディタの変更を監視
         new MutationObserver((mutations) => {
             this.onMutate(mutations, null);
@@ -370,7 +579,10 @@ class Editor {
                 handleElement.addEventListener("mousedown", (event) => {
                     if (0 === event.button) {
                         this.beginResize(handle, event);
+
                         event.preventDefault();
+                        event.stopPropagation();
+                        return false;
                     }
                 });
             }
@@ -391,6 +603,23 @@ class Editor {
         this.container.scrollTop = top;
     }
 
+    // 選択範囲を設定
+    static setSelection(iframe, selectionRange) {
+        if (selectionRange) {
+            const selection = iframe.contentWindow.getSelection();
+
+            if (selection) {
+                const range = iframe.contentDocument.createRange();
+
+                range.setStart(selectionRange.startContainer, selectionRange.startOffset);
+                range.setEnd(selectionRange.endContainer, selectionRange.endOffset);
+
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }
+        }
+    }
+
     // 選択範囲を得る
     // 返り値はgetSelection()の値ではなくSelectionRangeというクラスであることに注意
     getSelectionRange() {
@@ -404,40 +633,38 @@ class Editor {
     }
 
     // キャレットの位置を得る
-    // キャレットが左端にあるとき矩形の位置がゼロになるので一時ノードを追加して位置を求めている
-    // 参考:https://stackoverflow.com/questions/50022681/range-getboundingclientrect-returns-zero-for-all-values-after-selecting-a-node
-    getRangeRect(range, ignoreModify) {
-        let rect = range.getBoundingClientRect();
-        if (range.collapsed && 0 === rect.top && 0 === rect.left) {
-            if (ignoreModify)
-                this.ignoreModify();
+    getRangeRect(selection, range) {
+        const rects = range.getClientRects();
+        if (0 === rects.length) {
+            if (selection.baseNode && selection.baseNode.parentNode)
+                return selection.baseNode.parentNode.getBoundingClientRect();
+        } else
+            return range.getBoundingClientRect();
 
-            const node = this.iframe.contentDocument.createTextNode('\ufeff');
-            range.insertNode(node);
-            rect = range.getBoundingClientRect();
-            node.remove();
-        }
-
-        return rect;
+        return null;
     }
 
     // 選択範囲までスクロール
-    scrollToSelection(ignoreModify) {
+    scrollToSelection() {
         const selection = this.iframe.contentWindow.getSelection();
 
         if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0).cloneRange();
-            const rect = this.getRangeRect(range, ignoreModify);
+            const rect = this.getRangeRect(selection, range);
 
-            if (rect.right >= this.container.clientWidth)
-                this.container.scrollLeft += rect.right - this.container.clientWidth;
-            else if (rect.left < 0)
-                this.container.scrollLeft += rect.left;
+            if (rect) {
+                const clientWidth = this.container.clientWidth;
+                if (rect.right >= clientWidth)
+                    this.container.scrollLeft += rect.right - clientWidth;
+                else if (rect.left < 0)
+                    this.container.scrollLeft += rect.left;
 
-            if (rect.bottom >= this.container.clientHeight)
-                this.container.scrollTop += rect.bottom - this.container.clientHeight;
-            else if (rect.top < 0)
-                this.container.scrollTop += rect.top;
+                const clientHeight = this.container.clientHeight;
+                if (rect.bottom >= clientHeight)
+                    this.container.scrollTop += rect.bottom - clientHeight;
+                else if (rect.top < 0)
+                    this.container.scrollTop += rect.top;
+            }
         }
     }
 
@@ -474,7 +701,7 @@ class Editor {
             this.ignoreModify();
             this.forceRedraw();
 
-            if (!this.grappingHandle) {
+            if (!this.grabbingHandle) {
                 let element = null;
 
                 if (1 === clone.children.length) {
@@ -668,169 +895,58 @@ class Editor {
         this.onModifyUndo();
     }
 
+    // リサイズアンドゥを追加
+    pushResizeUndo() {
+        this.undoList.length = this.undoPosition + 1;
+        this.undoList[this.undoPosition] = new ResizeUndoItem(this.inputType, this.grabbingElement, this.grabbingElement.getAttribute("style"), this.getSelectionRange());
+        this.undoPosition++;
+
+        this.onModifyUndo();
+    }
+
+    // リサイズアンドゥにサイズ変更を伝える
+    onResizeElement() {
+        this.undoList[this.undoPosition - 1].onResize();
+    }
+
     // アンドゥ
     undo() {
-        if (0 === this.undoPosition)
+        if (!this.canUndo())
             return;
+
+        this.releaseGrabbing();
 
         this.ignoreModify();
         this.resetUndo();
 
         this.undoPosition--;
-
-        const item = this.undoList[this.undoPosition];
-        for (let i = item.mutationList.length - 1; i >= 0; i--) {
-            if (item.mutationList[i].mutations) {
-                const mutations = item.mutationList[i].mutations.slice();
-
-                mutations.reverse();
-                this.undoMutations(mutations);
-            }
-
-            if (item.mutationList[i].selection) {
-                const selection = this.iframe.contentWindow.getSelection();
-
-                if (selection) {
-                    const range = this.iframe.contentDocument.createRange();
-
-                    range.setStart(item.mutationList[i].selection.startContainer, item.mutationList[i].selection.startOffset);
-                    range.setEnd(item.mutationList[i].selection.endContainer, item.mutationList[i].selection.endOffset);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                }
-            }
-        }
+        this.undoList[this.undoPosition].undo(this.iframe);
 
         this.setHandleRect(this.selectedElement);
 
-        this.scrollToSelection(true);
+        this.scrollToSelection();
 
         this.onModifyUndo();
-    }
-
-    // 変更をアンドゥ
-    undoMutations(mutations) {
-        for (let mutation of mutations) {
-            const type = mutation.type.toLowerCase();
-
-            if ("characterdata" === type) {
-                if (mutation.target)
-                    mutation.target.textContent = mutation._oldValue;
-            } else if ("childlist" === type) {
-                const nodes1 = Array.from(mutation.addedNodes).slice();
-                nodes1.reverse();
-
-                for (let node of nodes1) {
-                    node.remove();
-                }
-
-                const nodes2 = Array.from(mutation.removedNodes).slice();
-                nodes2.reverse();
-
-                for (let node of nodes2) {
-                    if (mutation.target) {
-                        if (mutation.previousSibling) {
-                            let parent = null;
-                            if (mutation.previousSibling.nextSibling)
-                                parent = mutation.previousSibling.nextSibling.parentNode;
-                            else
-                                parent = mutation.previousSibling.parentNode;
-
-                            if (parent)
-                                parent.insertBefore(node, mutation.previousSibling.nextSibling);
-                        } else if (mutation.nextSibling) {
-                            if (mutation.nextSibling.parentNode)
-                                mutation.nextSibling.parentNode.insertBefore(node, mutation.nextSibling);
-                        } else
-                            mutation.target.appendChild(node);
-                    }
-                }
-            } else if ("attributes" === type) {
-                if (mutation.target) {
-                    if (mutation.oldValue)
-                        mutation.target.setAttribute(mutation.attributeName, mutation.oldValue);
-                    else
-                        mutation.target.removeAttribute(mutation.attributeName);
-                }
-            }
-        }
     }
 
     // リドゥ
     redo() {
-        if (this.undoList.length === this.undoPosition)
+        if (!this.canRedo())
             return;
+
+        this.releaseGrabbing();
 
         this.ignoreModify();
         this.resetUndo();
 
-        for (let item of this.undoList[this.undoPosition].mutationList) {
-            if (item.selection) {
-                const selection = this.iframe.contentWindow.getSelection();
-
-                if (selection) {
-                    const range = this.iframe.contentDocument.createRange();
-
-                    range.setStart(item.selection.startContainer, item.selection.startOffset);
-                    range.setEnd(item.selection.endContainer, item.selection.endOffset);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                }
-            }
-
-            if (item.mutations)
-                this.redoMutations(item.mutations);
-        }
+        this.undoList[this.undoPosition].redo(this.iframe);
+        this.undoPosition++;
 
         this.setHandleRect(this.selectedElement);
 
-        this.undoPosition++;
-
-        this.scrollToSelection(true);
+        this.scrollToSelection();
 
         this.onModifyUndo();
-    }
-
-    // 変更をリドゥ
-    redoMutations(mutations) {
-        for (let mutation of mutations) {
-            const type = mutation.type.toLowerCase();
-
-            if ("characterdata" === type) {
-                if (mutation.target)
-                    mutation.target.textContent = mutation._currentValue;
-            } else if ("childlist" === type) {
-                for (let node of mutation.removedNodes) {
-                    node.remove();
-                }
-
-                for (let node of mutation.addedNodes) {
-                    if (mutation.target) {
-                        if (mutation.previousSibling) {
-                            let parent = null;
-                            if (mutation.previousSibling.nextSibling)
-                                parent = mutation.previousSibling.nextSibling.parentNode;
-                            else
-                                parent = mutation.previousSibling.parentNode;
-
-                            if (parent)
-                                parent.insertBefore(node, mutation.previousSibling.nextSibling);
-                        } else if (mutation.nextSibling) {
-                            if (mutation.nextSibling.parentNode)
-                                mutation.nextSibling.parentNode.insertBefore(node, mutation.nextSibling);
-                        } else
-                            mutation.target.appendChild(node);
-                    }
-                }
-            } else if ("attributes" === type) {
-                if (mutation.target) {
-                    if (mutation._currentValue)
-                        mutation.target.setAttribute(mutation.attributeName, mutation._currentValue);
-                    else
-                        mutation.target.removeAttribute(mutation.attributeName);
-                }
-            }
-        }
     }
 
     // 1回だけ変更を無視
@@ -840,7 +956,7 @@ class Editor {
 
     // 直前のアンドゥが指定したタイプと同じか
     isSameUndoType(type) {
-        if (0 === this.undoPosition)
+        if (!this.canUndo())
             return false;
 
         return this.undoList[this.undoPosition - 1].type.toLowerCase() === type.toLowerCase();
@@ -848,7 +964,7 @@ class Editor {
 
     // 直前のアンドゥアイテムを削除
     removePrevUndoItem() {
-        if (0 === this.undoPosition)
+        if (!this.canUndo())
             return;
 
         this.undoList.splice(this.undoPosition - 1, 1);
@@ -876,13 +992,13 @@ class Editor {
 
     // 現在のアンドゥの入力タイプを変更
     setUndoType(type) {
-        if (0 !== this.undoPosition)
+        if (this.canUndo())
             this.undoList[this.undoPosition - 1].type = type;
     }
 
     // アンドゥの入力タイプを得る
     getUndoType() {
-        if (0 === this.undoPosition)
+        if (!this.canUndo())
             return "";
 
         return this.undoList[this.undoPosition - 1].type;
@@ -890,14 +1006,14 @@ class Editor {
 
     // リドゥの入力タイプを得る
     getRedoType() {
-        if (this.undoList.length === this.undoPosition)
+        if (!this.canRedo())
             return "";
 
         return this.undoList[this.undoPosition].type;
     }
 
     // 日本語のアンドゥ名を得る
-    getJapaneseUndoName(type) {
+    static getJapaneseUndoName(type) {
         if (!type)
             return "";
 
@@ -981,32 +1097,36 @@ class Editor {
         const undoElement = document.getElementById("undo");
         if (undoElement) {
             undoElement.classList.toggle("unenabled", !this.canUndo());
-            undoElement.title = this.getJapaneseUndoName(this.getUndoType());
+            undoElement.title = Editor.getJapaneseUndoName(this.getUndoType());
         }
 
         const redoElement = document.getElementById("redo");
         if (redoElement) {
             redoElement.classList.toggle("unenabled", !this.canRedo());
-            redoElement.title = this.getJapaneseUndoName(this.getRedoType());
+            redoElement.title = Editor.getJapaneseUndoName(this.getRedoType());
         }
     }
 
     // コマンドを実行
     command(commandid, type, value) {
-        this.inputByUser = true;
+        this.releaseGrabbing();
 
         // execCommandを使用するとbeforeinputイベントが起こらないので、ここで入力タイプを記憶しておく必要がある
         this.inputType = "";
         if (type)
             this.inputType = type;
 
+        this.inputByUser = true;
+
         this.iframe.contentDocument.execCommand(commandid, false, value);
 
-        this.scrollToSelection(false);
+        this.scrollToSelection();
     }
 
     // クリア
     clear() {
+        this.releaseGrabbing();
+
         this.inputType = "clear";
         this.inputByUser = true;
 
@@ -1019,7 +1139,7 @@ class Editor {
 
         this.showHandle(false);
 
-        this.scrollToSelection(false);
+        this.scrollToSelection();
     }
 
     // フォーマットを削除
@@ -1053,6 +1173,7 @@ class Editor {
     }
 
     // フォントサイズを設定
+    // とりあえず最大サイズに変更しておき、あとから選択ノードのフォントサイズを変更する
     setFontSize(size) {
         this.command("fontSize", "formatFontSize", 7);
 
@@ -1128,29 +1249,32 @@ class Editor {
     }
 
     // リサイズ開始
-    beginResize(grapHandle, event) {
-        this.grappingElement = this.selectedElement;
-        this.grappingHandle = grapHandle;
+    beginResize(handle, event) {
+        this.grabbingElement = this.selectedElement;
+        this.grabbingHandle = handle;
 
-        if (this.grappingElement) {
-            const rect = this.grappingElement.getBoundingClientRect();
+        if (this.grabbingElement) {
+            const rect = this.grabbingElement.getBoundingClientRect();
 
-            if (-1 !== this.grappingHandle.indexOf("left"))
-                this.grappingFirstX = -parseInt(rect.left) + event.pageX;
-            else if (-1 !== this.grappingHandle.indexOf("right"))
-                this.grappingFirstX = parseInt(rect.right) - event.pageX;
+            if (-1 !== this.grabbingHandle.indexOf("left"))
+                this.grabbingFirstX = -parseInt(rect.left) + event.pageX;
+            else if (-1 !== this.grabbingHandle.indexOf("right"))
+                this.grabbingFirstX = parseInt(rect.right) - event.pageX;
 
-            if (-1 !== this.grappingHandle.indexOf("top"))
-                this.grappingFirstY = -parseInt(rect.top) + event.pageY;
-            else if (-1 !== this.grappingHandle.indexOf("bottom"))
-                this.grappingFirstY = parseInt(rect.bottom) - event.pageY;
+            if (-1 !== this.grabbingHandle.indexOf("top"))
+                this.grabbingFirstY = -parseInt(rect.top) + event.pageY;
+            else if (-1 !== this.grabbingHandle.indexOf("bottom"))
+                this.grabbingFirstY = parseInt(rect.bottom) - event.pageY;
 
-            this.grappingFirstLeft = rect.left;
-            this.grappingFirstTop = rect.top;
-            this.grappingFirstWidth = rect.width;
-            this.grappingFirstHeight = rect.height;
+            this.grabbingFirstLeft = rect.left;
+            this.grabbingFirstTop = rect.top;
+            this.grabbingFirstWidth = rect.width;
+            this.grabbingFirstHeight = rect.height;
 
-            const tag = this.grappingElement.tagName.toLowerCase();
+            this.grabbingFirstScrollLeft = this.container.scrollLeft;
+            this.grabbingFirstScrollTop = this.container.scrollTop;
+
+            const tag = this.grabbingElement.tagName.toLowerCase();
             if ("img" === tag)
                 this.inputType = "resizeImage";
             else if ("table" === tag)
@@ -1158,19 +1282,19 @@ class Editor {
             else if ("th" === tag || "td" === tag)
                 this.inputType = "resizeTableCell";
 
-            // ドラッグ中は一時的にiframe全体のカーソルを変更しておく
+            // リサイズ中は一時的に全体のマウスを変更しておく
             let cursor = "unset";
-            if (-1 !== this.grappingHandle.indexOf("left")) {
-                if (-1 !== this.grappingHandle.indexOf("top"))
+            if (-1 !== this.grabbingHandle.indexOf("left")) {
+                if (-1 !== this.grabbingHandle.indexOf("top"))
                     cursor = "nwse-resize";
-                else if (-1 !== this.grappingHandle.indexOf("bottom"))
+                else if (-1 !== this.grabbingHandle.indexOf("bottom"))
                     cursor = "nesw-resize";
                 else
                     cursor = "ew-resize";
-            } else if (-1 !== this.grappingHandle.indexOf("right")) {
-                if (-1 !== this.grappingHandle.indexOf("top"))
+            } else if (-1 !== this.grabbingHandle.indexOf("right")) {
+                if (-1 !== this.grabbingHandle.indexOf("top"))
                     cursor = "nesw-resize";
-                else if (-1 !== this.grappingHandle.indexOf("bottom"))
+                else if (-1 !== this.grabbingHandle.indexOf("bottom"))
                     cursor = "nwse-resize";
                 else
                     cursor = "ew-resize";
@@ -1179,24 +1303,139 @@ class Editor {
             }
             this.iframe.contentDocument.documentElement.style.setProperty("--editor-cursor", cursor);
             this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", cursor);
+
+            // リサイズアンドゥを追加
+            this.pushResizeUndo();
         }
     }
 
+    // リサイズを実行
+    doResize(x, y) {
+        const rect = this.grabbingElement.getBoundingClientRect();
+        let width = rect.width;
+        let height = rect.height;
+
+        if (-1 !== this.grabbingHandle.indexOf("left"))
+            width = this.grabbingFirstX + this.grabbingFirstWidth + (this.grabbingFirstLeft - x);
+        else if (-1 !== this.grabbingHandle.indexOf("right"))
+            width = this.grabbingFirstX + x - this.grabbingFirstLeft;
+        else
+            width = this.grabbingFirstWidth;
+
+        if (-1 !== this.grabbingHandle.indexOf("top"))
+            height = this.grabbingFirstY + this.grabbingFirstHeight + (this.grabbingFirstTop - y);
+        else if (-1 !== this.grabbingHandle.indexOf("bottom"))
+            height = this.grabbingFirstY + y - this.grabbingFirstTop;
+        else
+            height = this.grabbingFirstHeight;
+
+        // 画像なら縦横比を固定
+        if ("img" === this.grabbingElement.tagName.toLowerCase()) {
+            if (0 !== this.grabbingElement.naturalWidth && 0 !== this.grabbingElement.naturalHeight) {
+                const divideWH = this.grabbingElement.naturalWidth / this.grabbingElement.naturalHeight;
+                const divideHW = this.grabbingElement.naturalHeight / this.grabbingElement.naturalWidth;
+
+                if (-1 !== this.grabbingHandle.indexOf("center"))
+                    width = parseInt(height * divideWH);
+                else
+                    height = parseInt(width * divideHW);
+
+                if (-1 !== this.grabbingHandle.indexOf("middle"))
+                    height = parseInt(width * divideHW);
+                else
+                    width = parseInt(height * divideWH);
+
+                if (width > height) {
+                    width = parseInt(height * divideWH);
+
+                    if (height > parseInt(rect.width * divideHW))
+                        height = parseInt(rect.width * divideHW);
+                } else {
+                    height = parseInt(width * divideHW);
+
+                    if (width > parseInt(rect.height * divideWH))
+                        width = parseInt(rect.height * divideWH);
+                }
+            }
+        }
+
+        if (width < Editor.ELEMENT_MIN_SIZE)
+            width = Editor.ELEMENT_MIN_SIZE;
+
+        if (height < Editor.ELEMENT_MIN_SIZE)
+            height = Editor.ELEMENT_MIN_SIZE;
+
+        Editor.setElementSize(this.grabbingElement, width, height);
+
+        this.onResizeElement();
+
+        this.ignoreModify();
+
+        this.setHandleRect(this.grabbingElement);
+    }
+
+    // 要素をつかんでいるかどうか
+    isGrabbing() {
+        return this.grabbingElement && this.grabbingHandle;
+    }
+
+    // つかんでいる要素を離す
+    // 何かつかんでいればtrueを返す
+    releaseGrabbing() {
+        this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", "grab");
+
+        if (this.grabbingTimer) {
+            clearInterval(this.grabbingTimer);
+            this.grabbingTimer = null;
+        }
+
+        if (this.isGrabbing()) {
+            this.grabbingElement = null;
+            this.grabbingHandle = null;
+
+            this.iframe.contentDocument.documentElement.style.setProperty("--editor-cursor", "unset");
+
+            return true;
+        }
+
+        return false;
+    }
+
     // 要素をリサイズ
-    setElementSize(element, width, height) {
-        let style = element.getAttribute("style");
-        if (!style)
-            style = "";
+    static setElementSize(element, width, height) {
+        if (element) {
+            let style = element.getAttribute("style");
+            if (!style)
+                style = "";
 
-        style = style.replace(/\s*width\s*:\s*[\w\s()\-.,%#]+;?/i, "");
-        style = style.replace(/\s*height\s*:\s*[\w\s()\-.,%#]+;?/i, "");
+            style = style.replace(/\s*width\s*:\s*[\w\s()\-.,%#]+;?/i, "");
+            style = style.replace(/\s*height\s*:\s*[\w\s()\-.,%#]+;?/i, "");
 
-        element.setAttribute("style", style + " width: " + width + "px; height: " + height + "px;");
+            element.setAttribute("style", style + " width: " + width + "px; height: " + height + "px;");
+        }
+    }
+
+    // 要素のスタイルを設定
+    static setElementStyle(element, style) {
+        if (element) {
+            if (style)
+                element.setAttribute("style", style);
+            else
+                element.removeAttribute("style");
+        }
     }
 
     // フォーカスを得る
     focus() {
         this.editor.focus();
+    }
+
+    // 矩形が点を含むか
+    static ptInRect(x, y, rect) {
+        if (x >= rect.left && y >= rect.top && x <= rect.right && y <= rect.bottom)
+            return true;
+
+        return false;
     }
 }
 
