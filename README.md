@@ -1,10 +1,10 @@
-# UndoTest
+# JavaScriptを使用したwysiwygエディタのアンドゥとリドゥ
 
 wysiwygエディタのアンドゥとリドゥの動作確認のみを目的としたプログラム。
-Chromeでのみ動作を確認。
+Chromeでのみ動作。
 
 A program intended only for checking the operation of undo and redo of the wysiwyg editor.
-Confirmed to work only in Chrome.
+Only works in Chrome.
 
 
 ### デモ (Demo)
@@ -29,9 +29,13 @@ You can change the size by dragging the resize handle that appears when you sele
 
 ### 既知の問題 (Known Issues)
 
-今のところなし。
+フォントサイズを何回も繰り返すとアンドゥ・リドゥが多少時間がかかる。
 
-None for now.
+リサイズ中にエディタ外にマウスを移動させるとカーソル形状がデフォルトに戻ってしまう。
+
+If you repeat the font size many times, undo/redo takes a little time.
+
+When the mouse is moved outside the editor while resizing, the cursor shape returns to the default.
 
 
 ### 作者 (Author)
