@@ -55,10 +55,6 @@
                     --editor-image-cursor: grab;
                 }
 
-                body * {
-                    cursor: var(--editor-cursor);
-                }
-
                 .editor:focus {
                     outline: none;
                 }
@@ -148,12 +144,12 @@
                     cursor: se-resize;
                 }
 
-                .handle-pointer-events-none .handle-corner {
-                    pointer-events: none;
-                }
-
                 .single-image-select img::selection {
                     background-color: transparent;
+                }
+
+                body * {
+                    cursor: var(--editor-cursor);
                 }
             </style>
         </head>
