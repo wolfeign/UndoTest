@@ -45,6 +45,7 @@
 // 1.05 [2022/09/17(Sat)] - バグ修正
 // 
 //  ・Ctrl+Vによる貼り付けとCtrl+Xによる切り取りの際にアンドゥをリセットするようにした
+//  ・カーソルキーの入力時にアンドゥをリセットするようにした
 
 
 
@@ -386,7 +387,8 @@ class Editor {
                     this.redo();
                     return false;
                 }
-            }
+            } else if ("arrowleft" === key || "arrowright" === key || "arrowup" === key || "arrowdown" === key)
+                this.resetUndo();
         }, false);
 
         // マウスが押されたとき
