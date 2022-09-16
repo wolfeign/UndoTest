@@ -1,9 +1,9 @@
 // エディタのアンドゥ・リドゥのテストを目的としたプログラム
 // 
-// バージョン : 1.04
+// バージョン : 1.05
 // 制作者　　 : wolfeign(@wolfeign)
 // 公開日　　 : 2022/08/26(Fri)
-// 更新日　　 : 2022/09/03(Sat)
+// 更新日　　 : 2022/09/17(Sat)
 // ライセンス : MITライセンス
 
 // 【バージョン履歴】
@@ -30,7 +30,7 @@
 //  ・画像をクリックしたときカーソルを掴む形状にした
 //  ・要素をつかんでいる間はキー入力を無視するようにした
 //
-//  ・キャレットが文頭にある場合 Editor.getRangeRect()が正常な値を返さないことがあるため修正
+//  ・キャレットが行頭にある場合 Editor.getRangeRect()が正常な値を返さないことがあるため修正
 // 
 // 
 // 1.04 [2022/09/03(Sat)] - 自動スクロールと大幅修正
@@ -40,6 +40,12 @@
 //  ・UndoItemクラスとMutationItemにundo()とredo()のメソッドを実装
 //  ・リサイズ中に右クリックメニューを表示した場合リサイズを中断するようにした
 //  ・Editorに3種類の定数を追加
+// 
+// 
+// 1.05 [2022/09/17(Sat)] - バグ修正
+// 
+//  ・Ctrl+Vによる貼り付けとCtrl+Xによる切り取りの際にアンドゥをリセットするようにした
+
 
 
 // 選択範囲
@@ -389,7 +395,7 @@ class Editor {
 
             if (element && element.tagName) {
                 if ("img" === element.tagName.toLowerCase()) {
-                    if (0 === event.button) {
+                    if (0 === event.button || 2 === event.button) {
                         // 画像のみを選択
                         this.selectImage(element);
 
@@ -584,7 +590,7 @@ class Editor {
                         event.stopPropagation();
                         return false;
                     }
-                });
+                }, false);
             }
         }
     }
@@ -803,6 +809,9 @@ class Editor {
         }
 
         const type = this.inputType.toLowerCase();
+        if ("insertfrompaste" === type || "deletebycut" === type)
+            this.resetUndo();
+
         if (this.inputByUser && "insertfromdrop" === type && this.isSameUndoType("deleteByDrag")) {
             this.setUndoType("insertFromDrop");
 
