@@ -1,9 +1,9 @@
 // エディタのアンドゥ・リドゥのテストを目的としたプログラム
 // 
-// バージョン : 1.05
+// バージョン : 1.06
 // 制作者　　 : wolfeign(@wolfeign)
 // 公開日　　 : 2022/08/26(Fri)
-// 更新日　　 : 2022/09/17(Sat)
+// 更新日　　 : 2022/10/22(Sat)
 // ライセンス : MITライセンス
 
 // 【バージョン履歴】
@@ -46,6 +46,11 @@
 // 
 //  ・Ctrl+Vによる貼り付けとCtrl+Xによる切り取りの際にアンドゥをリセットするようにした
 //  ・カーソルキーの入力時にアンドゥをリセットするようにした
+// 
+// 
+// 1.06 [2022/10/22(Sat)] - バグ修正
+// 
+//  ・BSキーを入力した際 選択範囲の変更イベントが発生しない為、自発的に発生させるようにした
 
 
 
@@ -311,7 +316,7 @@ class Editor {
         this.grabbingFirstScrollTop = 0;
         // つかんでいる間のタイマー
         this.grabbingTimer = null;
-        // つかんでいいる間のマウスカーソルの位置
+        // つかんでいる間のマウスカーソルの位置
         this.grabbingCursorX = 0;
         this.grabbingCursorY = 0;
 
@@ -535,7 +540,7 @@ class Editor {
 
         // IMEの入力開始時
         this.editor.addEventListener("compositionstart", (event) => {
-            // なにも選択されてなければ専用のリストに追加していき、IME入力完了後にアンドゥリスト追加する
+            // なにも選択されてなければ専用のリストに追加していき、IME入力完了後にアンドゥリストに追加する
             const selection = iframe.contentWindow.getSelection();
             if (selection && selection.rangeCount > 0) {
                 const range = selection.getRangeAt(0);
@@ -715,6 +720,7 @@ class Editor {
                 if (1 === clone.children.length) {
                     if (("img" === clone.children[0].tagName.toLowerCase()) && (0 === range.toString().length)) {
                         const images = this.iframe.contentDocument.getElementsByTagName("img");
+
                         for (let i = images.length - 1; i >= 0; i--) {
                             const nodeRange = this.iframe.contentDocument.createRange();
                             nodeRange.selectNode(images[i]);
@@ -841,6 +847,10 @@ class Editor {
 
             this.pushUndoContinuous(null, this.getSelectionRange());
         }
+
+        // BSキーでは選択範囲の変更イベントが発生しないので自発的に発生させている
+        if ("deletecontentbackward" === type)
+            this.onSelectionChange();
     }
 
     // アンドゥの連続記録をリセットし、次回から新たなアンドゥとする
@@ -1189,7 +1199,7 @@ class Editor {
         this.command("fontSize", "formatFontSize", 7);
 
         const selection = this.iframe.contentWindow.getSelection();
-        if (selection) {
+        if (selection && selection.rangeCount > 0) {
             const elements = this.iframe.contentDocument.querySelectorAll("span");
 
             for (let element of elements) {
@@ -1250,7 +1260,7 @@ class Editor {
             return;
 
         const selection = this.iframe.contentWindow.getSelection();
-        if (selection) {
+        if (selection && selection.rangeCount > 0) {
             const range = this.iframe.contentDocument.createRange();
 
             range.selectNode(image);
@@ -1419,8 +1429,8 @@ class Editor {
             if (!style)
                 style = "";
 
-            style = style.replace(/\s*width\s*:\s*[\w\s()\-.,%#]+;?/i, "");
-            style = style.replace(/\s*height\s*:\s*[\w\s()\-.,%#]+;?/i, "");
+            style = style.replace(/width\s*:\s*[\w\s()\-.,%#]+;?/gi, "");
+            style = style.replace(/height\s*:\s*[\w\s()\-.,%#]+;?/gi, "");
 
             element.setAttribute("style", style + " width: " + width + "px; height: " + height + "px;");
         }
