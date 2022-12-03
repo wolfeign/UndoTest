@@ -1,9 +1,9 @@
-// エディタのアンドゥ・リドゥのテストを目的としたプログラム
+﻿// エディタのアンドゥ・リドゥのテストを目的としたプログラム
 // 
-// バージョン : 1.06
+// バージョン : 1.07
 // 制作者　　 : wolfeign(@wolfeign)
 // 公開日　　 : 2022/08/26(Fri)
-// 更新日　　 : 2022/10/22(Sat)
+// 更新日　　 : 2022/12/03(Sat)
 // ライセンス : MITライセンス
 
 // 【バージョン履歴】
@@ -51,7 +51,12 @@
 // 1.06 [2022/10/22(Sat)] - バグ修正
 // 
 //  ・BSキーを入力した際 選択範囲の変更イベントが発生しない為、自発的に発生させるようにした
-
+// 
+// 
+// 1.07 [2022/12/03(Sat)] - バグ修正とローカル画像のドラッグ&ドロップ
+// 
+//  ・Rangeのcollapsedの意味を逆に理解していたため修正(単なる勘違い)
+//  ・ローカルの画像ファイルをドラッグ&ドロップで挿入できるようにした
 
 
 // 選択範囲
@@ -504,8 +509,12 @@ class Editor {
         }, false);
 
         // ドロップされたとき
-        iframe.contentWindow.addEventListener("drop", () => {
+        iframe.contentWindow.addEventListener("drop", (event) => {
             this.iframe.contentDocument.documentElement.style.setProperty("--editor-image-cursor", "grab");
+
+            // 追記:2022/12/3
+            this.onDropFile(event);
+            event.preventDefault();
         }, false);
 
         // 選択が開始されたとき
@@ -545,8 +554,8 @@ class Editor {
             if (selection && selection.rangeCount > 0) {
                 const range = selection.getRangeAt(0);
 
-                if (!range.collapsed)
-                    this.isFirstIme = true;
+                // 修正:2022/12/3
+                this.isFirstIme = range.collapsed;
             }
 
             this.resetUndo();
@@ -655,6 +664,19 @@ class Editor {
             return range.getBoundingClientRect();
 
         return null;
+    }
+
+    // キャレット位置を座標で設定
+    // 追加:2022/12/3
+    setCaretPosition(x, y) {
+        const selection = this.iframe.contentWindow.getSelection();
+
+        if (selection && selection.rangeCount > 0) {
+            const range = this.iframe.contentDocument.caretRangeFromPoint(x, y);
+
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
     }
 
     // 選択範囲までスクロール
@@ -791,6 +813,61 @@ class Editor {
             const fontSizeTextElement = document.getElementById("fontsize-text");
             if (fontSizeTextElement)
                 fontSizeTextElement.textContent = parseFloat(fontsize.toFixed(3)) + "px";
+        }
+    }
+
+    // ファイルがドロップされたときに呼び出される
+    // 追加:2022/12/3
+    onDropFile(event) {
+        const length = event.dataTransfer.files.length;
+        const x = event.pageX, y = event.pageY;
+        const images = [];
+        for (let i = 0; i < length; i++) {
+            images.push({
+                filename: event.dataTransfer.files[i].name,
+                size: event.dataTransfer.files[i].size,
+                src: "",
+                complete: false
+            });
+        }
+
+        for (let i = 0; i < length; i++) {
+            const file = event.dataTransfer.files[i];
+            const reader = new FileReader();
+
+            reader.onload = () => {
+                images[i].complete = true;
+                if (reader.result.startsWith("data:image/"))
+                    images[i].src = reader.result;
+
+                let found = false;
+                for (let j = 0; j < length; j++) {
+                    if (!images[j].complete) {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found) {
+                    let html = "";
+                    for (let j = 0; j < length; j++) {
+                        if ("" !== images[j].src)
+                            html += `<img src="${images[j].src}" title="${images[j].filename} (${Editor.getByteWithUnit(images[j].size)})" />`;
+                    }
+
+                    if ("" !== html) {
+                        this.setCaretPosition(x, y);
+                        this.command("insertHTML", "insertImage", html);
+                        this.resetUndo();
+                    }
+                }
+            };
+
+            reader.onerror = () => {
+                images[i].complete = true;
+            };
+
+            reader.readAsDataURL(file);
         }
     }
 
@@ -1458,10 +1535,31 @@ class Editor {
 
         return false;
     }
+
+    // 単位付きバイト数に変換
+    // 追加:2022/12/3
+    static getByteWithUnit(byte) {
+        const units = ["EB", "PB", "TB", "GB", "MB", "KB"];
+
+        let div = Math.pow(1024, units.length);
+        for (let i = 0; i < units.length; i++) {
+            if (byte >= div) {
+                if ((byte / div) < 10)
+                    return Math.floor(byte / div * 100) / 100 + units[i];
+                else
+                    return Math.floor(byte / div * 10) / 10 + units[i];
+            }
+            div /= 1024;
+        }
+
+        if (byte > 1)
+            return byte + "Bytes";
+
+        return byte + "Byte";
+    }
 }
-
-
 const editor = new Editor();
+
 
 function onLoadFrame(iframe) {
     editor.setFrame(iframe);
