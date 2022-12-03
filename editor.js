@@ -57,6 +57,7 @@
 // 
 //  ・Rangeのcollapsedの意味を逆に理解していたため修正(単なる勘違い)
 //  ・ローカルの画像ファイルをドラッグ&ドロップで挿入できるようにした
+//  ・単位がpxでないフォントサイズのHTMLを貼り付けた場合でもpxに変換してサイズを表示するようにした
 
 
 // 選択範囲
@@ -804,7 +805,9 @@ class Editor {
         // ツールバーのフォントサイズの値を変更
         // UIの処理なので以下は適宜書き換え、もしくは削除
         {
-            const fontsize = this.getCursorFontSize();
+            // フォントサイズをpxで得る
+            // 修正:2022/12/3
+            const fontsize = this.getCursorFontSize("px");
 
             const fontSizeElement = document.getElementById("fontsize");
             if (fontSizeElement)
@@ -1289,7 +1292,7 @@ class Editor {
     }
 
     // カーソル位置のフォントサイズを得る
-    getCursorFontSize() {
+    getCursorFontSize(unit) {
         let node = null;
 
         const selection = this.iframe.contentWindow.getSelection();
@@ -1303,7 +1306,8 @@ class Editor {
         if (!node)
             return 0;
 
-        return parseFloat(this.iframe.contentWindow.getComputedStyle(node, null)["fontSize"]);
+        // 修正:2022/12/3
+        return parseFloat(Editor.convertCSSLengthUnit(this.iframe.contentWindow.getComputedStyle(node, null)["fontSize"], unit));
     }
 
     // 文字の色を変更
@@ -1556,6 +1560,31 @@ class Editor {
             return byte + "Bytes";
 
         return byte + "Byte";
+    }
+
+    // 指定した値を別の単位で得る
+    // 参考:https://stackoverflow.com/questions/10463518/converting-em-to-px-in-javascript-and-getting-default-font-size
+    static convertCSSLengthUnit(fromUnitValue, toUnit) {
+        const value = fromUnitValue.match(/[0-9]+\.*[0-9]*/g)[0];
+        const unit = fromUnitValue.match(/[a-zA-Z]+/g)[0];
+
+        const frag = document.createRange().createContextualFragment(`<div style="all: initial; pointer-events: none; display: block; position: absolute; border: none; padding: 0; margin: 0; background: rgba(0,0,0,0); color: color: rgba(0,0,0,0); width: 1${unit}; height: 1px;"></div>`);
+        document.body.appendChild(frag);
+        const measureElement = document.body.children[document.body.children.length - 1];
+        const toUnitValuePixel = measureElement.getBoundingClientRect().width * value; // X
+        measureElement.remove();
+
+        if (toUnit) {
+            const frag2 = document.createRange().createContextualFragment(`<div style="all: initial; pointer-events: none; display: block; position: absolute; border: none; padding: 0; margin: 0; background: rgba(0,0,0,0); color: color: rgba(0,0,0,0); width: 1${toUnit}; height: 1px;"></div>`);
+            document.body.appendChild(frag2);
+            const measureElement2 = document.body.children[document.body.children.length - 1];
+            const valueUnit2 = measureElement2.getBoundingClientRect().width; // Y
+            measureElement2.remove();
+
+            return (toUnitValuePixel / valueUnit2) + toUnit;
+        }
+
+        return toUnitValuePixel + "px";
     }
 }
 const editor = new Editor();
